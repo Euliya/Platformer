@@ -1,6 +1,4 @@
 using System.Collections;
-using System.Collections.Generic;
-using JetBrains.Annotations;
 using UnityEngine;
 
 public class PlayerController : MonoBehaviour
@@ -33,6 +31,22 @@ public class PlayerController : MonoBehaviour
     [SerializeField]private bool IsCoyote = false;
     private bool onGround;
 
+    public float dashT;
+    private bool isDashing;
+
+    public Vector2 playerInput;
+
+    public LayerMask ground;
+
+    bool isClimb=false;
+    bool canClimb;
+    bool isLeavingClimb;
+    bool isClimbLastFrame;
+
+    public float climbSpeed;
+
+    public PhysicsMaterial2D BounceMaterial;
+
     // Start is called before the first frame update
     void Start()
     {
@@ -51,11 +65,13 @@ public class PlayerController : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        rb.sharedMaterial=mt();
         // The input from the player needs to be determined and
         // then passed in the to the MovementUpdate which should
         // manage the actual movement of the character.
-        Vector2 playerInput = new Vector2(Input.GetAxis("Horizontal"), 0);
+        playerInput = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
         MovementUpdate(playerInput);
+        
     }
 
     
@@ -63,13 +79,16 @@ public class PlayerController : MonoBehaviour
     {
         Vector2 currentV = rb.velocity;
 
-        if (playerInput != Vector2.zero)
+        if (isDashing )
+        {
+            currentV.x = 4 * maxSpeed * playerInput.x;
+        }
+        else if (playerInput != Vector2.zero)
         {
             direction = playerInput.x < 0 ? FacingDirection.left : FacingDirection.right;
-            currentV += acc * playerInput * Time.deltaTime;
+            currentV.x += acc * playerInput.x * Time.deltaTime;
             currentV.x = Mathf.Clamp(currentV.x, -maxSpeed, maxSpeed);
         }
-
         else if (Mathf.Abs(currentV.x )> 0)
         {
             currentV.x = currentV.normalized.x * Mathf.Clamp(Mathf.Abs(currentV.x) - dec * Time.deltaTime, 0, maxSpeed);
@@ -79,9 +98,9 @@ public class PlayerController : MonoBehaviour
         {
             StartCoroutine(coyoteTime());
         }
-        onGround = IsGrounded();
+        
 
-        if (Input.GetButton("Jump") && (IsGrounded()||IsCoyote))
+        if (Input.GetButton("Jump") && (IsGrounded()||IsCoyote) && !isClimb)
         {
             IsJump = true;
             IsCoyote = false;
@@ -94,9 +113,70 @@ public class PlayerController : MonoBehaviour
             currentV.y += jumpGrv * Time.deltaTime;
         }
 
+        if(Input.GetKeyDown(KeyCode.LeftShift))
+        {
+            isDashing = true;
+            StartCoroutine(Dash());
+        }
+
+        
+        if (playerInput.y != 0 && !isClimb && canClimb)
+        {
+            isClimb = true;
+            rb.gravityScale = 0;
+        }
+        if (isClimb && canClimb)
+        {
+            currentV.y = climbSpeed * playerInput.normalized.y;
+        }
+        else
+        {
+            rb.gravityScale = grv;
+        }
+
+        if (onGround)
+        {
+            isClimb = false;
+        }
+        if (currentV.y>0 && !isClimb && isClimbLastFrame)
+        {
+            isLeavingClimb = true;
+            print("leave");
+        }
+
+        if (isLeavingClimb)
+        {
+            currentV.y = climbSpeed * playerInput.normalized.y;
+            if (!IsGrounded() && onGround)
+            {
+                currentV = Vector2.zero;
+                isLeavingClimb = false;
+                rb.gravityScale = grv;
+            }
+        }
+
+        isClimbLastFrame = isClimb;
+        onGround = IsGrounded();
+
+
         currentV.y = Mathf.Clamp(currentV.y, -termSpeed, iniJumpV);
 
         rb.velocity = currentV;
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        canClimb = true;
+    }
+    private void OnTriggerExit2D(Collider2D collision)
+    {
+        canClimb = false;
+    }
+    PhysicsMaterial2D mt()
+    {
+        RaycastHit2D hit = Physics2D.Raycast(transform.position, Vector2.down, ray, ground);
+        return hit.collider != null && hit.collider.CompareTag("Bounce") ? BounceMaterial : null;
+
     }
     IEnumerator Falling()
     {
@@ -110,7 +190,11 @@ public class PlayerController : MonoBehaviour
         yield return new WaitForSeconds(coyoteT);
         IsCoyote = false;
     }
-
+    IEnumerator Dash()
+    {
+        yield return new WaitForSeconds(dashT);
+        isDashing = false;
+    }
     public bool IsWalking()
     {
         return rb.velocity.x != 0;
@@ -118,10 +202,13 @@ public class PlayerController : MonoBehaviour
     public bool IsGrounded()
     {
         Debug.DrawRay(transform.position, Vector2.down * ray, Color.red);
-        RaycastHit2D hit = Physics2D.Raycast(transform.position, Vector2.down, ray);
+        RaycastHit2D hit = Physics2D.Raycast(transform.position, Vector2.down, ray,ground);
         return hit.collider != null;
     }
-
+    public bool IsClimbing()
+    {
+        return isClimb; 
+    }
     public FacingDirection GetFacingDirection()
     {
         return direction;
